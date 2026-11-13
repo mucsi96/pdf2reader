@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """pdf2reader — turn any PDF into clean Markdown/ePub (figures included) with a vision model, and send it to Readwise Reader.
 
-Each page is rendered to PNG and sent to Claude (via the `claude` CLI, so it uses
-your subscription — no API key) together with the page's raw text layer. The
+Each page is rendered to PNG and sent directly to the OpenAI Responses API
+(using OPENAI_API_KEY) together with the page's raw text layer. The
 model rebuilds the page as clean Markdown: headings, paragraphs re-flowed,
 tables as pipe tables, charts/slides/figures described, running headers/footers
 and page numbers dropped. Pages run in parallel; results are cached per page so
 re-runs only redo failures.
 
-Usage: pdf2reader input.pdf|URL [-o out.md] [--model sonnet] [--dpi 170] [-j 6] [--pages 1-5,9]
+Usage: pdf2reader input.pdf|URL [-o out.md] [--dpi 170] [-j 6] [--pages 1-5,9]
              [--epub] [--readwise] [--title T] [--author A]
 
 Figures (vector drawings and embedded images) are cropped at --fig-dpi (200) into <name>_images/
@@ -27,9 +27,11 @@ import argparse, time, base64, shutil, json, urllib.parse, concurrent.futures as
 
 import fitz  # PyMuPDF
 
+MODEL = "gpt-6.1-sol"
+
 PROMPT = """You are converting page {n} of {total} of a PDF into clean Markdown.
 
-The page image is {img} (attached, or read it with your Read tool).
+The page image is {img} (attached).
 Below is the PDF's embedded text layer for this page (may be empty, garbled, out of order, or missing
 text that lives inside images/vector slides — the IMAGE is the source of truth, the text layer only
 helps with exact spelling and numbers):
@@ -124,16 +126,28 @@ def parse_pages(spec, total):
     return [p for p in out if 1 <= p <= total]
 
 
-def llm(prompt, model, engine, img=None, timeout=600):
-    """Run one model call. engine 'claude' = Claude Code CLI (Mac subscription);
-    engine 'pi' = pi CLI (any model it lists, e.g. openai-codex/gpt-6.1-sol)."""
-    if engine == "claude":
-        cmd = ["claude", "-p", "--model", model] + (["--allowedTools", "Read"] if img else [])
-        return subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout)
-    cmd = ["pi", "-p", "--no-session", "-nc", "-ne", "-ns", "-np", "--no-tools", "--model", model]
-    cmd += [f"@{img}"] if img else []
-    return subprocess.run(cmd + ["--", prompt], capture_output=True, text=True, timeout=timeout,
-                          stdin=subprocess.DEVNULL)
+def llm(prompt, img=None, timeout=600):
+    """Call GPT-6.1 Sol directly through the OpenAI Responses API."""
+    from openai import APIError, OpenAI
+    content = [{"type": "input_text", "text": prompt}]
+    if img:
+        encoded = base64.b64encode(pathlib.Path(img).read_bytes()).decode("ascii")
+        content.append({"type": "input_image", "image_url": f"data:image/png;base64,{encoded}"})
+    try:
+        with OpenAI(base_url="https://api.openai.com/v1", timeout=timeout) as client:
+            # Omit reasoning effort so the model uses its API default.
+            response = client.responses.create(
+                model=MODEL, input=[{"role": "user", "content": content}], store=False,
+            )
+        if response.status != "completed" or not response.output_text.strip():
+            return subprocess.CompletedProcess(
+                ["openai", MODEL], 1, "",
+                f"OpenAI returned {response.status}: "
+                f"{response.error or response.incomplete_details or 'no output text'}",
+            )
+        return subprocess.CompletedProcess(["openai", MODEL], 0, response.output_text, "")
+    except APIError as e:
+        return subprocess.CompletedProcess(["openai", MODEL], 1, "", str(e))
 
 
 def convert_page(doc_path, n, total, args, cache):
@@ -160,7 +174,7 @@ def convert_page(doc_path, n, total, args, cache):
             figures = FIG_RULES.format(regions="\n".join(lines))
     prompt = PROMPT.format(n=n, total=total, img=img, text=text or "(empty)", figures=figures)
     for attempt in range(3):
-        r = llm(prompt, args.model, args.engine, img=img)
+        r = llm(prompt, img=img)
         md = r.stdout.strip()
         if r.returncode == 0 and md:
             md = re.sub(r"^```(?:markdown)?\n|\n```$", "", md)
@@ -169,12 +183,12 @@ def convert_page(doc_path, n, total, args, cache):
     raise RuntimeError(f"page {n} failed: {r.stderr[-500:]}")
 
 
-def meta_from(first_page_md, model, engine):
+def meta_from(first_page_md):
     """Ask the model for title/author/date from the first page."""
     prompt = ("From this first page of a document, return ONLY compact JSON with keys "
               '"title", "author", "date" (YYYY-MM-DD or "" if unknown). Authors comma-separated.\n\n'
               + first_page_md[:6000])
-    r = llm(prompt, "haiku" if engine == "claude" else model, engine, timeout=180)
+    r = llm(prompt, timeout=180)
     m = re.search(r"\{.*\}", r.stdout, re.S)
     try:
         return json.loads(m.group(0)) if m else {}
@@ -337,9 +351,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("src")
     ap.add_argument("-o", "--out")
-    ap.add_argument("--engine", choices=["claude", "pi"],
-                    default="pi" if shutil.which("pi") else "claude")
-    ap.add_argument("--model", help="default: sonnet (claude engine) or openai-codex/gpt-6.1-sol (pi engine)")
     ap.add_argument("--dpi", type=int, default=170)
     ap.add_argument("-j", "--jobs", type=int, default=6)
     ap.add_argument("--pages")
@@ -357,12 +368,13 @@ def main():
     ap.add_argument("--fig-dpi", type=int, default=200)
     ap.add_argument("--fresh", action="store_true", help="ignore page cache")
     args = ap.parse_args()
-    args.model = args.model or ("sonnet" if args.engine == "claude" else "openai-codex/gpt-6.1-sol")
+    if not os.environ.get("OPENAI_API_KEY"):
+        ap.error("set OPENAI_API_KEY to use the OpenAI API")
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="pdf2reader-"))
     pdf = fetch(args.src, tmp)
     digest = hashlib.sha1(pdf.read_bytes()).hexdigest()[:12]
-    cache = pathlib.Path.home() / ".cache" / "pdf2reader" / (f"{digest}-{args.model.replace('/', '_')}-{args.dpi}" + ("-img2" if args.images else ""))
+    cache = pathlib.Path.home() / ".cache" / "pdf2reader" / (f"{digest}-openai-{MODEL}-{args.dpi}" + ("-img2" if args.images else ""))
     cache.mkdir(parents=True, exist_ok=True)
     if args.fresh:
         for f in cache.glob("page-*.md"):
@@ -372,7 +384,7 @@ def main():
     pages = parse_pages(args.pages, total)
     name = re.sub(r"\.pdf$", "", pathlib.Path(re.sub(r"\?.*", "", args.src)).name, flags=re.I)
     out = pathlib.Path(args.out or f"{name}.md").expanduser()
-    print(f"{total} pages -> {out}  (model={args.model}, dpi={args.dpi}, jobs={args.jobs}, cache={cache})", file=sys.stderr)
+    print(f"{total} pages -> {out}  (model={MODEL}, dpi={args.dpi}, jobs={args.jobs}, cache={cache})", file=sys.stderr)
 
     results, failed = {}, []
     with cf.ThreadPoolExecutor(args.jobs) as ex:
@@ -444,7 +456,7 @@ def main():
         args.epub = True
         to = reader_email(args.reader_email)
     if args.epub or args.readwise or args.readwise_api:
-        meta = meta_from(fitz.open(pdf)[0].get_text() + "\n\n" + results.get(min(results), ""), args.model, args.engine)
+        meta = meta_from(fitz.open(pdf)[0].get_text() + "\n\n" + results.get(min(results), ""))
         if args.title: meta["title"] = args.title
         if args.author: meta["author"] = args.author
         print(f"metadata: {meta}", file=sys.stderr)

@@ -23,22 +23,27 @@ rebuild it as Markdown, using the PDF's own text layer only to get spelling and 
 
 ## Requirements
 
-- Python 3.10+, `pip install -r requirements.txt` (PyMuPDF, google-auth)
+- Python 3.10+, `pip install -r requirements.txt` (PyMuPDF, google-auth, OpenAI SDK)
 - [pandoc](https://pandoc.org)
-- A model runner: [`pi`](https://github.com/badlogic/pi-mono) (default; any model it lists,
-  e.g. `openai-codex/gpt-6.1-sol`) or [Claude Code](https://claude.com/claude-code) (`--engine claude`)
+- An OpenAI API key (`OPENAI_API_KEY`) with access to `gpt-6.1-sol` (the only supported model).
+  Page images and metadata requests go directly to the OpenAI Responses API.
+  Reasoning effort is omitted, using the model's default.
 - For `--readwise`: a Gmail/Workspace account you can get an API access token for, and your
   Readwise access token (to remove the email stub)
 
 ## Usage
 
 ```sh
-pdf2reader paper.pdf                       # -> paper.md + paper_images/
-pdf2reader https://example.com/x.pdf --epub
-pdf2reader paper.pdf --readwise            # ePub emailed to Reader
-pdf2reader paper.pdf --pages 1-5,9 --model openai-codex/gpt-5.5 -j 8
-pdf2reader paper.pdf --no-images           # text only
+export OPENAI_API_KEY="your-api-key"
+python pdf2reader.py paper.pdf --epub      # -> paper.md + paper_images/ + paper.epub
+python pdf2reader.py https://example.com/x.pdf --epub
+python pdf2reader.py paper.pdf --readwise  # ePub emailed to Reader
+python pdf2reader.py paper.pdf --pages 1-5,9 -j 8
+python pdf2reader.py paper.pdf --no-images # text only
 ```
+
+The model and OpenAI endpoint are fixed. The web service uses the same API;
+provide `OPENAI_API_KEY` in its process environment as well.
 
 ## Configuration
 
@@ -89,7 +94,7 @@ bytes back (use the Share-sheet Shortcut for those).
 - `--readwise-api` — save HTML through the Reader API instead of email (text only; Reader drops
   images). `--replace` deletes an existing copy with the same source first.
 - `--keep-stub` — leave Reader's email-body document alone.
-- `--engine claude|pi`, `--model`, `--dpi`, `--fig-dpi`, `--fresh`, `--title`, `--author`.
+- `--dpi`, `--fig-dpi`, `--fresh`, `--title`, `--author`.
 
 ## License
 
