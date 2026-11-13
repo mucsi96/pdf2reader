@@ -18,6 +18,7 @@ import sys
 import tempfile
 
 import pymupdf as fitz
+from dotenv import load_dotenv
 
 MODEL = "gpt-6.1-sol"
 MARKDOWN_FORMAT = "markdown-raw_html-raw_tex-yaml_metadata_block"
@@ -339,8 +340,9 @@ def main():
     parser.add_argument("--title")
     parser.add_argument("--author")
     args = parser.parse_args()
+    load_dotenv(pathlib.Path.cwd() / ".env")
     if not os.environ.get("OPENAI_API_KEY"):
-        parser.error("set OPENAI_API_KEY")
+        parser.error("set OPENAI_API_KEY in .env or the environment")
     if not shutil.which("pandoc"):
         parser.error("install Pandoc 3.1.3 or newer with sandbox support")
     if min(args.jobs, args.dpi, args.fig_dpi) < 1:
@@ -350,4 +352,3 @@ def main():
             run(args, pathlib.Path(work))
     except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
         parser.exit(1, f"Conversion failed: {error}\n")
-

@@ -34,11 +34,15 @@ supported Python release for the current dependency stack.
 ## Run
 
 ```sh
-export OPENAI_API_KEY="your-api-key"
+cp .env.example .env
+# Edit .env and set OPENAI_API_KEY to your API key.
 uv run pdf2reader book.pdf --epub
 uv run pdf2reader book.pdf --epub -o second-conversion -j 8
 uv run pdf2reader book.pdf --pages 1-5,9 --epub
 ```
+
+The CLI loads `.env` from the current working directory. Existing environment
+variables take precedence. `.env` is ignored by Git.
 
 Default output:
 

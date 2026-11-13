@@ -9,6 +9,7 @@ license-files = ["LICENSE"]
 dependencies = [
     "openai>=3.50.0",
     "pymupdf>=2.1",
+    "python-dotenv>=1.2.4",
 ]
 
 [project.scripts]
