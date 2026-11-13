@@ -2,7 +2,6 @@ import argparse
 import concurrent.futures
 import io
 import json
-import os
 import pathlib
 import subprocess
 import tempfile
@@ -13,7 +12,9 @@ from unittest.mock import patch
 
 import pymupdf as fitz
 
-import pdf2reader as p
+from pdf2reader import export, openai_client, pipeline
+from pdf2reader.checkpoints import checkpoint_directory
+from pdf2reader.pages import convert_page
 
 
 class PipelineTests(unittest.TestCase):
@@ -35,21 +36,21 @@ class PipelineTests(unittest.TestCase):
                                       title=None, author=None)
 
     def test_failed_ai_page_resumes_without_repeating_success(self):
-        checkpoints = p.checkpoint_directory(self.pdf, self.args)
+        checkpoints = checkpoint_directory(self.pdf, self.args)
         success = subprocess.CompletedProcess([], 0, "# Chapter\n\nText", "")
         failure = subprocess.CompletedProcess([], 1, "", "temporary failure")
-        with patch.object(p, "llm", side_effect=[success, failure]) as api:
-            first = p.convert_page(self.pdf, 1, 2, self.args, checkpoints)
+        with patch.object(openai_client, "llm", side_effect=[success, failure]) as api:
+            first = convert_page(self.pdf, 1, 2, self.args, checkpoints)
             with self.assertRaisesRegex(RuntimeError, "page 2 failed"):
-                p.convert_page(self.pdf, 2, 2, self.args, checkpoints)
+                convert_page(self.pdf, 2, 2, self.args, checkpoints)
             self.assertEqual(api.call_count, 2)
         self.assertFalse((checkpoints / "page-2.json").exists())
-        with patch.object(p, "llm", return_value=success) as api:
-            self.assertEqual(p.convert_page(self.pdf, 1, 2, self.args, checkpoints), first)
-            p.convert_page(self.pdf, 2, 2, self.args, checkpoints)
+        with patch.object(openai_client, "llm", return_value=success) as api:
+            self.assertEqual(convert_page(self.pdf, 1, 2, self.args, checkpoints), first)
+            convert_page(self.pdf, 2, 2, self.args, checkpoints)
             self.assertEqual(api.call_count, 1)
         self.args.dpi = 80
-        self.assertNotEqual(p.checkpoint_directory(self.pdf, self.args), checkpoints)
+        self.assertNotEqual(checkpoint_directory(self.pdf, self.args), checkpoints)
         self.assertEqual(list(checkpoints.glob("page-*-*")), [])
 
     def test_malicious_references_cannot_reach_epub(self):
@@ -78,9 +79,9 @@ Math $x^2$ and a footnote.[^1]
 |---|---|
 | 1 | 2 |
 '''
-        ast = p.sanitize_page(md, {"FIG_1": ("p1-1.png", self.png)}, self.root)
-        embedded = p.embedded_ast(ast, {"p1-1.png": self.png})
-        epub = p.pandoc(json.dumps(embedded).encode(), "json", "epub3", self.root, "--mathml", "--toc")
+        ast = export.sanitize_page(md, {"FIG_1": ("p1-1.png", self.png)}, self.root)
+        embedded = export.embedded_ast(ast, {"p1-1.png": self.png})
+        epub = export.pandoc(json.dumps(embedded).encode(), "json", "epub3", self.root, "--mathml", "--toc")
         with zipfile.ZipFile(io.BytesIO(epub)) as archive:
             contents = b"\n".join(archive.read(name) for name in archive.namelist())
             self.assertNotIn(b"DO_NOT_EXPORT_THIS_FILE", contents)
@@ -105,21 +106,21 @@ Math $x^2$ and a footnote.[^1]
                 text = "# Chapter\n\nParagraph with math $x^2$.\n\n![Figure](FIG_1)"
             return subprocess.CompletedProcess([], 0, text, "")
 
-        original = p.pandoc
+        original = export.pandoc
         def fail_epub(data, source, target, work, *options):
             if target == "epub3":
                 raise RuntimeError("export interrupted")
             return original(data, source, target, work, *options)
 
         # One worker keeps native PDF rendering serial in this in-process test.
-        with patch.object(p.cf, "ProcessPoolExecutor", concurrent.futures.ThreadPoolExecutor):
-            with patch.object(p, "llm", side_effect=fake_ai) as api, patch.object(p, "pandoc", side_effect=fail_epub):
+        with patch.object(pipeline.cf, "ProcessPoolExecutor", concurrent.futures.ThreadPoolExecutor):
+            with patch.object(openai_client, "llm", side_effect=fake_ai) as api, patch.object(export, "pandoc", side_effect=fail_epub):
                 with self.assertRaisesRegex(RuntimeError, "export interrupted"):
-                    p.run(self.args, self.root)
+                    pipeline.run(self.args, self.root)
                 self.assertEqual(api.call_count, 3)  # two pages + metadata
             self.assertFalse(pathlib.Path(self.args.out).exists())
-            with patch.object(p, "llm", side_effect=AssertionError("AI call repeated")):
-                p.run(self.args, self.root)
+            with patch.object(openai_client, "llm", side_effect=AssertionError("AI call repeated")):
+                pipeline.run(self.args, self.root)
         output = pathlib.Path(self.args.out)
         self.assertTrue((output / "book.md").exists())
         with zipfile.ZipFile(output / "book.epub") as archive:
@@ -127,7 +128,7 @@ Math $x^2$ and a footnote.[^1]
         marker = output / "unrelated.txt"
         marker.write_text("keep me")
         with self.assertRaisesRegex(ValueError, "output already exists"):
-            p.run(self.args, self.root)
+            pipeline.run(self.args, self.root)
         self.assertEqual(marker.read_text(), "keep me")
         self.assertEqual(output.stat().st_mode & 0o777, 0o700)
 

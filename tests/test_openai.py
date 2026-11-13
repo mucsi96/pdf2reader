@@ -14,8 +14,8 @@ from unittest.mock import patch
 import pymupdf as fitz
 from openai import OpenAI
 
-from pdf2reader import llm, meta_from
-import pdf2reader as p
+from pdf2reader.budget import RequestBudget
+from pdf2reader.openai_client import llm, meta_from, retry_delay
 
 
 class OpenAIIntegrationTests(unittest.TestCase):
@@ -137,7 +137,7 @@ class BudgetTests(unittest.TestCase):
     def test_default_prices_cache_writes_and_long_context(self):
         from openai.types.responses import ResponseUsage
         with tempfile.TemporaryDirectory() as tmp, multiprocessing.Manager() as manager:
-            budget = p.RequestBudget(manager, pathlib.Path(tmp), 10)
+            budget = RequestBudget(manager, pathlib.Path(tmp), 10)
             def usage(count):
                 return ResponseUsage.model_validate({
                     "input_tokens": count, "output_tokens": 1000, "total_tokens": count + 1000,
@@ -152,26 +152,26 @@ class BudgetTests(unittest.TestCase):
                 budget.record(usage(300000))
                 # Long request: input/cache doubled, output 1.5x, then prior total.
                 self.assertIn("$1.266700 USD", output.getvalue())
-            resumed = p.RequestBudget(manager, pathlib.Path(tmp), 10)
+            resumed = RequestBudget(manager, pathlib.Path(tmp), 10)
             self.assertEqual(dict(resumed.usage), dict(budget.usage))
 
     def test_old_usage_checkpoint_gets_default_pricing(self):
         with tempfile.TemporaryDirectory() as tmp, multiprocessing.Manager() as manager:
             pathlib.Path(tmp, "usage.json").write_text(json.dumps(
                 {"input": 1000, "cached": 200, "output": 100, "unknown": 0}))
-            budget = p.RequestBudget(manager, pathlib.Path(tmp), 10, (None, None, None))
+            budget = RequestBudget(manager, pathlib.Path(tmp), 10, (None, None, None))
             with patch("sys.stderr", new_callable=io.StringIO) as output:
                 budget.report()
                 self.assertIn("$0.002620 USD", output.getvalue())
 
     def test_shared_pacing_cooldown_and_resumed_cost(self):
         with tempfile.TemporaryDirectory() as tmp, multiprocessing.Manager() as manager:
-            budget = p.RequestBudget(manager, pathlib.Path(tmp), 10, (2, 1, 8))
+            budget = RequestBudget(manager, pathlib.Path(tmp), 10, (2, 1, 8))
             clock = [100.0]
             def sleep(seconds):
                 clock[0] += seconds
-            with patch.object(p.time, "monotonic", side_effect=lambda: clock[0]), \
-                    patch.object(p.time, "sleep", side_effect=sleep):
+            with patch("pdf2reader.budget.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("pdf2reader.budget.time.sleep", side_effect=sleep):
                 budget.wait()
                 budget.wait()
                 self.assertEqual(clock[0], 106)
@@ -183,12 +183,12 @@ class BudgetTests(unittest.TestCase):
             with patch("sys.stderr", new_callable=io.StringIO) as output:
                 budget.record(usage)
                 self.assertIn("$0.002600 USD", output.getvalue())
-            resumed = p.RequestBudget(manager, pathlib.Path(tmp), 10, (2, 1, 8))
+            resumed = RequestBudget(manager, pathlib.Path(tmp), 10, (2, 1, 8))
             self.assertEqual(dict(resumed.usage), dict(budget.usage))
 
     def test_retry_after_is_respected(self):
         error = SimpleNamespace(response=SimpleNamespace(headers={"retry-after": "120"}))
-        self.assertGreaterEqual(p.retry_delay(error, 0), 120)
+        self.assertGreaterEqual(retry_delay(error, 0), 120)
 
 
 if __name__ == "__main__":

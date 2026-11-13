@@ -137,6 +137,25 @@ See [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for the review scope and remaining 
 The application lives in `src/pdf2reader` and is installed by `uv sync` in editable
 mode. `uv run python -m pdf2reader` also runs the CLI.
 
+```text
+src/pdf2reader/
+├── __init__.py       # package description
+├── __main__.py       # python -m entry point
+├── cli.py            # arguments, environment, and CLI errors
+├── pipeline.py       # parallel conversion and book assembly
+├── pages.py          # PDF rendering, figures, and page conversion
+├── openai_client.py  # API requests, retries, and metadata extraction
+├── budget.py         # shared rate limits and token cost accounting
+├── checkpoints.py    # atomic storage and PDF/settings fingerprints
+└── export.py         # Pandoc, sanitization, and image embedding
+tests/
+├── test_openai.py    # local API stub and budget tests
+└── test_pipeline.py  # conversion, resume, and export security tests
+```
+
+The console entry point is `pdf2reader.cli:main`. Tests live outside the installed
+package and are discovered by the verification command above.
+
 ```sh
 uv add package-name          # add a runtime dependency
 uv lock --upgrade           # update all locked dependencies
