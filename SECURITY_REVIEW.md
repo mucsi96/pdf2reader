@@ -15,7 +15,7 @@ original review have now been removed, and export handling has been hardened.
 | Readwise/Gmail credential use and remote deletion | Remove all Reader/Gmail integration, keychain access and token-command configuration. |
 | Recursive output-directory deletion and overwriting | Require a new output directory and write with exclusive file creation. No cleanup or deletion of existing outputs. |
 | Uncontrolled persistent PDF/text/image caches | Full-page rasterizations use temporary directories cleaned up on completion or exceptions. At the user's request, completed AI responses and extracted figures persist in private resumable checkpoint directories with atomic writes. No uploaded-job storage. |
-| Unpinned dependency resolution | Pin direct and transitive dependencies in `requirements.lock`; remove unused google-auth dependency. |
+| Unpinned dependency resolution | Pin direct and transitive dependencies in `uv.lock`; remove unused google-auth dependency. |
 | Weak cache identifier | Replace SHA-1 with SHA-256 over PDF content and conversion settings for resumable AI checkpoints. |
 | Concurrent PyMuPDF access | Render pages in separate worker processes rather than threads, keeping parallel API processing. |
 
@@ -33,7 +33,7 @@ original review have now been removed, and export handling has been hardened.
 - Seven tests passed, including real SDK requests to a local stub, PDF rasterization,
   malformed resource references, EPUB contents, failed-page resume, and a simulated
   EPUB export failure followed by a rerun with **zero repeated AI calls**.
-- `pip-audit -r requirements.lock`: no known vulnerabilities found.
+- Before the uv project migration, `pip-audit -r requirements.lock` found no known vulnerabilities.
 - Bandit: no high/medium findings; two low findings for importing subprocess and
   calling Pandoc. The call uses fixed arguments, sandboxing, and no shell.
 - `git diff --check`: passed.

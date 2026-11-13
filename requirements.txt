@@ -1,2 +1,0 @@
-pymupdf==2.1
-openai==3.50.0

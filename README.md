@@ -17,24 +17,27 @@ Convert a **local PDF** into clean Markdown and EPUB using **OpenAI GPT-6.1 Sol*
 
 ## Install
 
-Use Python 3.13 and Pandoc 3.1.3 or newer (tested with 3.9).
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and
+Pandoc 3.1.3 or newer (tested with the latest release, 3.14) from your OS package
+manager or its official release packages.
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.lock
+uv sync --locked
 ```
 
-`requirements.lock` pins direct and transitive Python dependencies. Install Pandoc
-from your OS package manager or its official release packages.
+uv automatically downloads Python 3.14.10 (pinned in `.python-version`) and creates
+`.venv`. `pyproject.toml` declares dependencies and `uv.lock` pins the complete
+dependency graph. Python 3.14 is required: the latest PyMuPDF depends on
+ONNX Runtime, which does not yet publish Python 3.15 wheels. This is the newest
+supported Python release for the current dependency stack.
 
 ## Run
 
 ```sh
 export OPENAI_API_KEY="your-api-key"
-.venv/bin/python pdf2reader.py book.pdf --epub
-.venv/bin/python pdf2reader.py book.pdf --epub -o second-conversion -j 8
-.venv/bin/python pdf2reader.py book.pdf --pages 1-5,9 --epub
+uv run pdf2reader book.pdf --epub
+uv run pdf2reader book.pdf --epub -o second-conversion -j 8
+uv run pdf2reader book.pdf --pages 1-5,9 --epub
 ```
 
 Default output:
@@ -79,11 +82,23 @@ keychain access, configurable shell command, or remote deletion feature.
 ## Verification
 
 ```sh
-.venv/bin/python -m unittest -v
+uv run --locked python -m unittest -v
 ```
 
 Tests use a local API stub and synthetic PDFs; no paid model calls are made.
 See [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for the review scope and remaining limits.
+
+## Development
+
+The application lives in `src/pdf2reader` and is installed by `uv sync` in editable
+mode. `uv run python -m pdf2reader` also runs the CLI.
+
+```sh
+uv add package-name          # add a runtime dependency
+uv lock --upgrade           # update all locked dependencies
+uv sync --locked
+uv build                    # build a wheel and source distribution in dist/
+```
 
 ## License
 

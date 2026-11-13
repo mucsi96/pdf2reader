@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert a local PDF to Markdown and EPUB with OpenAI GPT-6.1 Sol.
 
-Usage: python pdf2reader.py book.pdf --epub [-o new-output-directory] [-j 6]
+Usage: uv run pdf2reader book.pdf --epub [-o new-output-directory] [-j 6]
 """
 import argparse
 import base64
@@ -351,6 +351,3 @@ def main():
     except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
         parser.exit(1, f"Conversion failed: {error}\n")
 
-
-if __name__ == "__main__":
-    main()
