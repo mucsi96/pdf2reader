@@ -53,6 +53,17 @@ class PipelineTests(unittest.TestCase):
         self.assertNotEqual(checkpoint_directory(self.pdf, self.args), checkpoints)
         self.assertEqual(list(checkpoints.glob("page-*-*")), [])
 
+    def test_blank_page_resumes_without_api_calls(self):
+        blank = self.root / "blank.pdf"
+        with fitz.open() as doc:
+            doc.new_page()
+            doc.save(blank)
+        checkpoints = checkpoint_directory(blank, self.args)
+        with patch.object(openai_client, "llm", side_effect=AssertionError("blank page sent to AI")):
+            self.assertEqual(convert_page(blank, 1, 1, self.args, checkpoints), (1, "", {}))
+            with patch("pdf2reader.pages.render_page", side_effect=AssertionError("checkpoint not reused")):
+                self.assertEqual(convert_page(blank, 1, 1, self.args, checkpoints), (1, "", {}))
+
     def test_malicious_references_cannot_reach_epub(self):
         secret = self.root / "secret.png"
         secret.write_bytes(b"DO_NOT_EXPORT_THIS_FILE")
@@ -98,6 +109,39 @@ Math $x^2$ and a footnote.[^1]
             self.assertIn(b"Note text", xhtml)
             self.assertEqual([archive.read(name) for name in archive.namelist() if name.endswith(".png")], [self.png])
 
+    def test_lists_without_blank_lines_preserve_nesting(self):
+        ast = export.sanitize_page("**Frameworks**\n- LangChain\n  - Tools\n- AutoGen", {}, self.root)
+        self.assertEqual([block["t"] for block in ast["blocks"]], ["Para", "BulletList"])
+        items = ast["blocks"][1]["c"]
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0][1]["t"], "BulletList")
+
+    def test_epub_cover_and_publication_date(self):
+        original = export.pandoc(b"# Title\n\nText", "markdown", "epub3", self.root)
+        ns = {"opf": "http://www.idpf.org/2007/opf", "dc": "http://purl.org/dc/elements/1.1/"}
+        for date in (None, "2026-03"):
+            with self.subTest(date=date):
+                result = export.finalize_epub(original, self.png, date)
+                with zipfile.ZipFile(io.BytesIO(result)) as archive:
+                    self.assertIsNone(archive.testzip())
+                    self.assertEqual(archive.infolist()[0].filename, "mimetype")
+                    self.assertEqual(archive.infolist()[0].compress_type, zipfile.ZIP_STORED)
+                    package_path = next(name for name in archive.namelist() if name.endswith(".opf"))
+                    package = ET.fromstring(archive.read(package_path))
+                    dates = package.findall("opf:metadata/dc:date", ns)
+                    self.assertEqual([element.text for element in dates], [date] if date else [])
+                    cover = package.find("opf:manifest/opf:item[@properties='cover-image']", ns)
+                    self.assertIsNotNone(cover)
+                    image_path = pathlib.PurePosixPath(package_path).parent / cover.attrib["href"]
+                    self.assertEqual(archive.read(str(image_path)), self.png)
+                    legacy = package.find("opf:metadata/opf:meta[@name='cover']", ns)
+                    self.assertEqual(legacy.attrib["content"], cover.attrib["id"])
+                    first = package.find("opf:spine/opf:itemref", ns)
+                    self.assertEqual(first.attrib["idref"], "pdf2reader-cover-page")
+                    for name in archive.namelist():
+                        if name.endswith((".xhtml", ".opf", ".xml")):
+                            ET.fromstring(archive.read(name))
+
     def test_full_pipeline_and_resume_after_export_failure(self):
         def fake_ai(prompt, **kwargs):
             if "Return ONLY JSON" in prompt:
@@ -123,6 +167,10 @@ Math $x^2$ and a footnote.[^1]
                 pipeline.run(self.args, self.root)
         output = pathlib.Path(self.args.out)
         self.assertTrue((output / "book.md").exists())
+        self.assertTrue((output / "book.md").read_text().startswith("![Cover](cover.png)"))
+        with fitz.open(self.pdf) as doc:
+            self.assertEqual((output / "cover.png").read_bytes(),
+                             doc[0].get_pixmap(dpi=self.args.fig_dpi).tobytes("png"))
         with zipfile.ZipFile(output / "book.epub") as archive:
             self.assertEqual(archive.read("mimetype"), b"application/epub+zip")
         marker = output / "unrelated.txt"

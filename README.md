@@ -90,6 +90,7 @@ Default output:
 book-output/
 ├── book.md
 ├── book.epub        # with --epub
+├── cover.png        # original first-page artwork, when page 1 is selected
 └── p1-1.png         # extracted figures, when present
 ```
 
@@ -115,6 +116,11 @@ for resuming. Delete it yourself when no longer needed. An API call interrupted
 before its result is saved may need to be repeated.
 
 Options: `--dpi`, `--fig-dpi`, `--no-images`, `--title`, `--author`, `--pages`, `--work-dir`, `-j`.
+When page 1 is selected, its original artwork is preserved in Markdown and embedded
+as the EPUB cover, including cover metadata for reader previews (such as KOReader).
+`--no-images` disables the cover as well as extracted figures. Use `--date YYYY`,
+`--date YYYY-MM`, or `--date YYYY-MM-DD` to override the publication date; unknown
+dates are omitted from EPUB metadata.
 Pandoc is required for both Markdown and EPUB output because validation uses its
 document parser.
 

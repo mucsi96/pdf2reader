@@ -4,9 +4,11 @@ Usage: uv run pdf2reader book.pdf --epub [-o new-output-directory] [-j 2]
 """
 
 import argparse
+import datetime
 import math
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -34,7 +36,15 @@ def main():
     parser.add_argument("--no-images", dest="images", action="store_false")
     parser.add_argument("--title")
     parser.add_argument("--author")
+    parser.add_argument("--date", help="publication date override (YYYY, YYYY-MM, or YYYY-MM-DD)")
     args = parser.parse_args()
+    if args.date:
+        try:
+            if not re.fullmatch(r"\d{4}(?:-\d{2}){0,2}", args.date):
+                raise ValueError
+            datetime.date.fromisoformat(args.date + "-01" * (2 - args.date.count("-")))
+        except ValueError:
+            parser.error("date must be a valid YYYY, YYYY-MM, or YYYY-MM-DD")
     load_dotenv(pathlib.Path.cwd() / ".env")
     for name in ("input_price", "cached_input_price", "output_price"):
         if getattr(args, name) is None and os.environ.get(f"OPENAI_{name.upper()}"):

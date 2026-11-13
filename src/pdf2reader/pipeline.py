@@ -76,12 +76,23 @@ def run_pipeline(args, work, manager):
     meta["title"] = args.title or meta.get("title") or pdf.stem
     if args.author:
         meta["author"] = args.author
+    if getattr(args, "date", None):
+        meta["date"] = args.date
+    meta = {key: value for key, value in meta.items() if value.strip()}
     book["meta"] = {k: {"t": "MetaString", "c": v} for k, v in meta.items()}
+    cover = None
+    if 1 in pages and args.images:
+        with fitz.open(pdf) as doc:
+            cover = doc[0].get_pixmap(dpi=args.fig_dpi).tobytes("png")
+        images["cover.png"] = cover
     markdown = export.pandoc(json.dumps(book).encode(), "json", export.MARKDOWN_FORMAT, work)
+    if cover is not None:
+        markdown = b"![Cover](cover.png)\n\n" + markdown
     epub = None
     if args.epub:
         epub = export.pandoc(json.dumps(export.embedded_ast(book, images)).encode(), "json", "epub3", work,
                              "--mathml", "--toc", "--toc-depth=2", "--split-level=2")
+        epub = export.finalize_epub(epub, cover, meta.get("date"))
 
     # A new private directory is created only after conversion succeeds.
     output.mkdir(mode=0o700, parents=True, exist_ok=False)

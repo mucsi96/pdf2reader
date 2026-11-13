@@ -2,9 +2,12 @@
 
 import base64
 import copy
+import io
 import json
 import shutil
 import subprocess
+import xml.etree.ElementTree as ET
+import zipfile
 
 MARKDOWN_FORMAT = "markdown-raw_html-raw_tex-yaml_metadata_block"
 
@@ -20,7 +23,7 @@ def pandoc(data, source, target, work, *options):
 
 def sanitize_page(md, figures, work):
     """Parse before validation: only exact extracted FIG IDs can become images."""
-    ast = json.loads(pandoc(md.encode(), MARKDOWN_FORMAT, "json", work))
+    ast = json.loads(pandoc(md.encode(), MARKDOWN_FORMAT + "+lists_without_preceding_blankline", "json", work))
     used = set()
 
     def walk(node):
@@ -65,3 +68,67 @@ def embedded_ast(ast, images):
             return {key: walk(item) for key, item in node.items()}
         return node
     return walk(copy.deepcopy(ast))
+
+
+def finalize_epub(data, cover=None, publication_date=None):
+    """Add a trusted cover without granting Pandoc filesystem access.
+
+    Both EPUB 3 cover-image and EPUB 2 cover metadata are supplied for readers
+    such as KOReader. Unknown publication dates are omitted, not set to 1970.
+    """
+    opf_ns = "http://www.idpf.org/2007/opf"
+    dc_ns = "http://purl.org/dc/elements/1.1/"
+    container_ns = "urn:oasis:names:tc:opendocument:xmlns:container"
+    with zipfile.ZipFile(io.BytesIO(data)) as source:
+        container = ET.fromstring(source.read("META-INF/container.xml"))
+        package_path = container.find(f".//{{{container_ns}}}rootfile").attrib["full-path"]
+        prefix = package_path.rpartition("/")[0]
+        prefix = prefix + "/" if prefix else ""
+        package = ET.fromstring(source.read(package_path))
+        metadata = package.find(f"{{{opf_ns}}}metadata")
+        for element in list(metadata):
+            if element.tag == f"{{{dc_ns}}}date":
+                metadata.remove(element)
+        if publication_date:
+            ET.SubElement(metadata, f"{{{dc_ns}}}date").text = publication_date
+
+        added = {}
+        if cover is not None:
+            manifest = package.find(f"{{{opf_ns}}}manifest")
+            spine = package.find(f"{{{opf_ns}}}spine")
+            ET.SubElement(metadata, f"{{{opf_ns}}}meta", {
+                "name": "cover", "content": "pdf2reader-cover-image"})
+            ET.SubElement(manifest, f"{{{opf_ns}}}item", {
+                "id": "pdf2reader-cover-image", "href": "pdf2reader-cover.png",
+                "media-type": "image/png", "properties": "cover-image"})
+            ET.SubElement(manifest, f"{{{opf_ns}}}item", {
+                "id": "pdf2reader-cover-page", "href": "pdf2reader-cover.xhtml",
+                "media-type": "application/xhtml+xml"})
+            spine.insert(0, ET.Element(f"{{{opf_ns}}}itemref", {
+                "idref": "pdf2reader-cover-page"}))
+            guide = package.find(f"{{{opf_ns}}}guide")
+            if guide is None:
+                guide = ET.SubElement(package, f"{{{opf_ns}}}guide")
+            ET.SubElement(guide, f"{{{opf_ns}}}reference", {
+                "type": "cover", "title": "Cover", "href": "pdf2reader-cover.xhtml"})
+            added[prefix + "pdf2reader-cover.png"] = cover
+            added[prefix + "pdf2reader-cover.xhtml"] = b'''<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Cover</title><style>
+html, body { margin: 0; padding: 0; height: 100%; text-align: center; }
+img { width: 100%; height: 100vh; object-fit: contain; }
+</style></head><body epub:type="cover"><img src="pdf2reader-cover.png" alt="Cover" /></body></html>'''
+
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as target:
+            # EPUB requires the uncompressed mimetype entry to be first.
+            target.writestr("mimetype", source.read("mimetype"), compress_type=zipfile.ZIP_STORED)
+            for entry in source.infolist():
+                if entry.filename == "mimetype":
+                    continue
+                content = (ET.tostring(package, encoding="utf-8", xml_declaration=True)
+                           if entry.filename == package_path else source.read(entry.filename))
+                target.writestr(entry, content)
+            for name, content in added.items():
+                target.writestr(name, content)
+        return output.getvalue()

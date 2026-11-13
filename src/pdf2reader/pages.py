@@ -23,7 +23,9 @@ Preserve heading hierarchy, tables as pipe tables, footnotes, and LaTeX math
 Drop running headers, footers, page numbers, repeated logos and letterhead.
 Keep paragraph fragments that continue across pages without inventing missing text.
 Transcribe text and data in figures so it stays searchable. Never invent content;
-write [illegible] where needed. Do not output HTML or resource paths/URLs.
+write [illegible] where needed. Do not output HTML or resource paths.
+Preserve printed URLs as plain text, not Markdown links or image targets.
+Put a blank line before each list and preserve nested list indentation.
 Use only these figure IDs for images: {figures}
 Place each supplied figure once in reading order as ![short caption](FIG_k).
 The coordinates are percentages of page width/height (left, top, right, bottom).
@@ -74,7 +76,10 @@ def render_page(doc_path, n, total, args, work):
     figures, regions = {}, []
     with fitz.open(doc_path) as doc:
         page = doc[n - 1]
-        page.get_pixmap(dpi=args.dpi).save(img)
+        pixmap = page.get_pixmap(dpi=args.dpi)
+        if pixmap.is_unicolor and pixmap.pixel(0, 0) == (255, 255, 255):
+            return n, "", {}
+        pixmap.save(img)
         text = page.get_text("text")[:12000]
         pr = page.rect
         if args.images:
@@ -100,7 +105,7 @@ def convert_page(doc_path, n, total, args, checkpoint_dir):
         try:
             saved = json.loads(checkpoint.read_text())
             md = saved["markdown"]
-            if not isinstance(md, str) or not md.strip():
+            if not isinstance(md, str):
                 raise ValueError("invalid Markdown")
             figures = {}
             for key, encoded in saved["figures"].items():
