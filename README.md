@@ -37,12 +37,52 @@ supported Python release for the current dependency stack.
 cp .env.example .env
 # Edit .env and set OPENAI_API_KEY to your API key.
 uv run pdf2reader book.pdf --epub
-uv run pdf2reader book.pdf --epub -o second-conversion -j 8
+uv run pdf2reader book.pdf --epub -o second-conversion -j 2
 uv run pdf2reader book.pdf --pages 1-5,9 --epub
 ```
 
 The CLI loads `.env` from the current working directory. Existing environment
 variables take precedence. `.env` is ignored by Git.
+
+### Request limits and live cost
+
+The default is **two parallel pages** with request starts spaced at least six
+seconds apart (**10 requests/minute**, shared across workers and retries).
+Adjust with `-j` and `--requests-per-minute`. Rate limits and transient failures
+get at most two retries with exponential backoff and jitter; `Retry-After` is
+respected and pauses new requests across all workers. Actual token limits depend
+on your OpenAI account and page size; lower concurrency/request rate if needed.
+
+Every API response prints a running **estimated USD total** and token counts,
+including cached input and reasoning output tokens. OpenAI responses supply token
+usage, not a dollar charge. Built-in **GPT-6.1 Sol Standard** prices, verified
+2026-11-13 in the [model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol),
+are **$2 input, $0.10 cached input, and $10 output per million tokens**.
+The API's default reasoning effort is **medium**; reasoning tokens are already
+included in output usage and charged once at the output rate. Requests explicitly
+select the default (Standard) service tier.
+
+The estimate also includes [cache writes](https://developers.openai.com/api/docs/guides/prompt-caching)
+at $2.50/M for 30-minute retention or $5/M for 12-hour retention, and the
+long-context surcharge for requests above 272,000 input tokens (2× input/cache
+rates and 1.5× output). Optional `.env` price overrides:
+
+```sh
+OPENAI_INPUT_PRICE=2
+OPENAI_CACHED_INPUT_PRICE=0.10
+OPENAI_OUTPUT_PRICE=10
+```
+
+Or use `--input-price`, `--cached-input-price`, and `--output-price`.
+No configuration is needed to see dollar estimates. Usage is saved in `usage.json` inside
+the checkpoint directory, so the total includes earlier runs and metadata calls;
+reused page checkpoints add no cost. Rates supplied on the current run apply to
+all recorded tokens. Older usage checkpoints lack cache-write/context breakdowns;
+their historical tokens are estimated at ordinary short-context rates.
+Responses with missing usage are counted separately, and
+calls interrupted before usage is saved cannot be included. Totals update when
+responses arrive, including incomplete responses, rather than while a response
+is being generated. OpenAI billing remains the source of truth.
 
 Default output:
 

@@ -38,11 +38,11 @@ class PipelineTests(unittest.TestCase):
         checkpoints = p.checkpoint_directory(self.pdf, self.args)
         success = subprocess.CompletedProcess([], 0, "# Chapter\n\nText", "")
         failure = subprocess.CompletedProcess([], 1, "", "temporary failure")
-        with patch.object(p, "llm", side_effect=[success, failure, failure, failure]) as api:
+        with patch.object(p, "llm", side_effect=[success, failure]) as api:
             first = p.convert_page(self.pdf, 1, 2, self.args, checkpoints)
             with self.assertRaisesRegex(RuntimeError, "page 2 failed"):
                 p.convert_page(self.pdf, 2, 2, self.args, checkpoints)
-            self.assertEqual(api.call_count, 4)
+            self.assertEqual(api.call_count, 2)
         self.assertFalse((checkpoints / "page-2.json").exists())
         with patch.object(p, "llm", return_value=success) as api:
             self.assertEqual(p.convert_page(self.pdf, 1, 2, self.args, checkpoints), first)
