@@ -7,3 +7,5 @@ __pycache__/
 /out/
 config.json
 readwise-token
+*-work/
+*-output/

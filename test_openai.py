@@ -8,7 +8,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
-import fitz
+import pymupdf as fitz
 from openai import OpenAI
 
 from pdf2reader import llm, meta_from

@@ -1,87 +1,53 @@
-# Security review — 2026-11-13
+# Security review and remediation — 2026-11-13
 
-## Scope and conclusion
+All source, configuration, documentation, and dependency declarations were reviewed.
+No obvious malicious source was found. The risky optional features identified in the
+original review have now been removed, and export handling has been hardened.
 
-Reviewed every tracked file in this small repository, plus the new OpenAI tests:
-`pdf2reader.py`, `server.py`, `tex2text.py`, `requirements.txt`,
-`pdf2reader.service`, `config.example.json`, `README.md`, `LICENSE`,
-`.gitignore`, and `test_openai.py`.
+## Changes
 
-No obvious malware, hidden telemetry, obfuscated payloads, credential harvesting,
-or download-and-execute behavior was found in the reviewed source. **This is not
-a guarantee of safety:** the upstream implementation has the risks below.
-Dependencies were scanned for known advisories, not individually audited from
-source; native PDF parsing and Pandoc were not fuzzed. Git history and external
-services are outside the review scope.
+| Original finding | Resolution |
+|---|---|
+| Local file access/network fetches through model-generated image references | Parse Markdown into a Pandoc AST; accept only exact `FIG_k` IDs from the page's own extracted figures. Embed trusted PNG bytes in EPUB. Never open model-provided paths. |
+| Active raw content or arbitrary attributes in document output | Disable raw HTML/TeX parsing, remove residual raw nodes, strip links and document-supplied attributes. LaTeX math remains supported via MathML. |
+| Pandoc resolving arbitrary resources | Run every Pandoc invocation with `--sandbox`, pass document data through stdin, and embed allowlisted image bytes before EPUB export. |
+| Unauthenticated upload/webhook server and server-side URL fetching | Remove the server, service unit, URL download support and all networking except OpenAI requests. |
+| Readwise/Gmail credential use and remote deletion | Remove all Reader/Gmail integration, keychain access and token-command configuration. |
+| Recursive output-directory deletion and overwriting | Require a new output directory and write with exclusive file creation. No cleanup or deletion of existing outputs. |
+| Uncontrolled persistent PDF/text/image caches | Full-page rasterizations use temporary directories cleaned up on completion or exceptions. At the user's request, completed AI responses and extracted figures persist in private resumable checkpoint directories with atomic writes. No uploaded-job storage. |
+| Unpinned dependency resolution | Pin direct and transitive dependencies in `requirements.lock`; remove unused google-auth dependency. |
+| Weak cache identifier | Replace SHA-1 with SHA-256 over PDF content and conversion settings for resumable AI checkpoints. |
+| Concurrent PyMuPDF access | Render pages in separate worker processes rather than threads, keeping parallel API processing. |
 
-## Unresolved findings
+## Expected access
 
-1. **Untrusted image references can read local files or trigger network fetches.**
-   `pdf2reader.py:to_readwise` resolves image targets from model-generated Markdown
-   without restricting them to the generated asset directory. Absolute paths and
-   `../` paths can therefore be read and embedded in content sent to Readwise.
-   EPUB generation also passes model Markdown to Pandoc without sandboxing or
-   a resource allowlist. A malicious document could try to induce those references
-   through prompt injection. Remove or validate all image targets against the
-   generated figures before rendering/exporting; this has not been implemented.
+- Read the local PDF selected by the user.
+- Read `OPENAI_API_KEY` and the OpenAI SDK's normal environment configuration.
+- Send page images/text and a metadata prompt to the official OpenAI Responses API,
+  using only `gpt-6.1-sol`, default reasoning effort, and `store=False`.
+- Run the installed Pandoc executable with fixed options and sandboxing.
+- Write temporary files, private resumable AI checkpoints and a new output directory.
 
-2. **The optional web server lacks upload authentication and can fetch internal URLs.**
-   `server.py:H.do_POST` accepts jobs without an authorization check. Both listeners
-   bind to loopback, but a reverse proxy can expose them. The webhook secret is
-   optional, and `fetch_pdf` allows HTTP(S) destinations and redirects without
-   private-network filtering. Accessible callers could enqueue paid conversions
-   or make server-side requests to internal services. URL downloads read at most
-   200 MB + 1 byte but do not reject that overflow, and the job queue is unbounded.
+## Verification results
 
-3. **Existing output assets are recursively deleted.**
-   `pdf2reader.py:main` removes the entire `<output-stem>_images` directory on a
-   rerun, including unrelated files placed there. Markdown and EPUB outputs are
-   also overwritten. Use a dedicated output directory until asset cleanup is
-   restricted to files created by the converter.
-
-4. **Readwise integration intentionally deletes remote content.**
-   Successful webhook jobs delete the original Reader PDF. `--readwise-api
-   --replace` deletes an existing document and its highlights. Email-stub cleanup
-   deletes matching short email documents using a heuristic. These are documented
-   features, not hidden malware, but they can cause data loss. They do not run in
-   local `--epub` mode.
-
-5. **Local data and configuration are trusted and persistent.**
-   Rendered pages, text caches, uploaded PDFs and job logs persist locally.
-   `gmail_token_command` executes a command from the user's configuration without
-   a shell; it must remain trusted. macOS credential access is limited to the
-   named `readwise-token` keychain entry. Dependency versions are not locked, so
-   future installations may differ from the environment scanned here.
-
-## Expected external communication
-
-- User-supplied HTTP(S) PDF URLs and redirects for downloads.
-- `https://api.openai.com/v1/responses`: rendered pages, text layers, and metadata
-  prompts, authenticated using `OPENAI_API_KEY`. Model fixed to `gpt-6.1-sol`,
-  reasoning effort omitted, `store=False`. No model tools are enabled.
-- `readwise.io` and `gmail.googleapis.com` only for requested Reader integration.
-- A configured Gmail token command may contact its own authentication service.
-- Pandoc may resolve resources referenced by Markdown (see finding 1).
-
-No API keys are embedded in source. Base64 use encodes page images and email
-attachments; it is not an executable payload.
-
-## Checks performed
-
-- OpenAI SDK integration tests against a local HTTP stub: **4 passed**, covering
-  image transport, fixed model/endpoint, default effort omission, metadata,
-  incomplete output rejection, and API error reporting. No paid API calls made;
-  actual account access to `gpt-6.1-sol` has not been verified.
-- CLI help inspected: no provider/model selection flags remain.
+- Seven tests passed, including real SDK requests to a local stub, PDF rasterization,
+  malformed resource references, EPUB contents, failed-page resume, and a simulated
+  EPUB export failure followed by a rerun with **zero repeated AI calls**.
+- `pip-audit -r requirements.lock`: no known vulnerabilities found.
+- Bandit: no high/medium findings; two low findings for importing subprocess and
+  calling Pandoc. The call uses fixed arguments, sandboxing, and no shell.
 - `git diff --check`: passed.
-- Bandit scan of all three production Python files: 24 findings (1 high,
-  8 medium, 15 low). The high finding is SHA-1 used for a cache identifier,
-  not authentication. Other findings concern subprocesses, URL opening and broad
-  exception handling; manually reviewed in context. The scan is not a clean bill
-  of health and does not detect all findings above.
-- `pip-audit` of the installed virtual environment initially flagged its bundled
-  pip 25.1.1. Upgraded that local tool to 26.3 and rescanned:
-  **no known vulnerabilities found** in the installed environment.
 
-Local EPUB conversion needs further hardening for hostile input; the optional
-server should not be treated as an authenticated public service.
+## Remaining limits
+
+This is not a proof that all inputs or dependencies are harmless. Native PDF parsing
+and the installed Pandoc binary are trusted dependencies, not individually audited
+or fuzzed here. Keep them updated. Very large or malformed PDFs can still consume
+substantial memory, CPU, or API budget. A forced process kill or power loss can
+prevent temporary-directory cleanup. Final outputs and resumable AI checkpoints
+intentionally persist. Checkpoints are trusted local data, not an encrypted store;
+they must not be shared with untrusted writers.
+
+The SDK integration and conversion tests use stubbed model responses. No live paid
+conversion or account access to `gpt-6.1-sol` has been verified. `store=False` is an
+API request setting, not a claim about all server-side retention policies.
