@@ -1,0 +1,42 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python and locked dependencies
+        run: uv sync --locked
+
+      - name: Install Pandoc
+        env:
+          PANDOC_VERSION: "3.14"
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-amd64.tar.gz" \
+            --output "$RUNNER_TEMP/pandoc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/pandoc.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/pandoc-${PANDOC_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Run all tests
+        run: uv run --locked python -m unittest discover -s tests -v

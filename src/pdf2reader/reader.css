@@ -1,7 +1,7 @@
 /* Reflowable, high-contrast defaults for small screens and e-ink readers. */
 body { line-height: 1.4; }
 p { orphans: 2; widows: 2; }
-pre, code { font-family: monospace; }
+pre, code { font-family: monospace; hyphens: none; }
 code { overflow-wrap: break-word; word-wrap: break-word; }
 pre, pre.sourceCode {
   white-space: pre-wrap;
@@ -21,7 +21,7 @@ pre code {
   font-size: 1em;
   overflow-wrap: break-word;
   word-wrap: break-word;
-  word-break: break-all;
+  word-break: normal;
 }
 div.sourceCode { overflow: visible; }
 table {

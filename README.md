@@ -151,6 +151,8 @@ uv run --locked python -m unittest -v
 ```
 
 Tests use a local API stub and synthetic PDFs; no paid model calls are made.
+GitHub Actions runs the full suite on pushes to `main` and on every pull request,
+using the pinned Python version, locked dependencies, and Pandoc 3.14.
 See [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for the review scope and remaining limits.
 See [FORMATTING_REVIEW.md](FORMATTING_REVIEW.md) for the real-book formatting sample,
 small-screen rendering checks, and remaining limitations.
