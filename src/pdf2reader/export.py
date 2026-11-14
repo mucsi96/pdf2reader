@@ -4,16 +4,25 @@ import base64
 import copy
 import io
 import json
+import posixpath
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 import zipfile
+from importlib.resources import files
 
-MARKDOWN_FORMAT = "markdown-raw_html-raw_tex-yaml_metadata_block"
+MARKDOWN_FORMAT = "markdown-raw_html-raw_tex-yaml_metadata_block-implicit_figures"
+CODE_LANGUAGES = frozenset({"python", "json", "javascript", "typescript", "bash", "sh",
+                            "shell", "sql", "yaml", "toml", "xml", "html", "css", "text",
+                            "java", "c", "cpp", "rust", "go", "r", "console", "diff"})
 
 
 def pandoc(data, source, target, work, *options):
     """Pandoc receives stdin only and has filesystem/network access sandboxed."""
+    if target == "epub3":
+        # Highlighted span-per-line markup clips and adds gaps in some EPUB
+        # renderers. Plain semantic code retains whitespace and reflows reliably.
+        options = (*options, "--no-highlight")
     result = subprocess.run(
         [shutil.which("pandoc"), "--sandbox", "-f", source, "-t", target, *options],
         input=data, capture_output=True, cwd=work, timeout=120, check=True,
@@ -42,7 +51,9 @@ def sanitize_page(md, figures, work):
             return {"t": "Image", "c": [["", [], []], walk(caption), [figures[target][0], ""]]}
         if kind == "Link":
             return {"t": "Span", "c": [["", [], []], walk(value[1])]}
-        if kind in ("Code", "CodeBlock", "Div", "Span", "Table", "Figure"):
+        if kind in ("Code", "CodeBlock"):
+            value[0] = ["", [name for name in value[0][1] if name in CODE_LANGUAGES], []]
+        elif kind in ("Div", "Span", "Table", "Figure"):
             value[0] = ["", [], []]
         elif kind == "Header":
             value[1] = ["", [], []]
@@ -92,9 +103,12 @@ def finalize_epub(data, cover=None, publication_date=None):
         if publication_date:
             ET.SubElement(metadata, f"{{{dc_ns}}}date").text = publication_date
 
-        added = {}
+        manifest = package.find(f"{{{opf_ns}}}manifest")
+        stylesheet = prefix + "pdf2reader.css"
+        ET.SubElement(manifest, f"{{{opf_ns}}}item", {
+            "id": "pdf2reader-style", "href": "pdf2reader.css", "media-type": "text/css"})
+        added = {stylesheet: files("pdf2reader").joinpath("reader.css").read_bytes()}
         if cover is not None:
-            manifest = package.find(f"{{{opf_ns}}}manifest")
             spine = package.find(f"{{{opf_ns}}}spine")
             ET.SubElement(metadata, f"{{{opf_ns}}}meta", {
                 "name": "cover", "content": "pdf2reader-cover-image"})
@@ -128,6 +142,14 @@ img { width: 100%; height: 100vh; object-fit: contain; }
                     continue
                 content = (ET.tostring(package, encoding="utf-8", xml_declaration=True)
                            if entry.filename == package_path else source.read(entry.filename))
+                if entry.filename.endswith(".xhtml"):
+                    document = ET.fromstring(content)
+                    head = document.find("{http://www.w3.org/1999/xhtml}head")
+                    if head is not None:
+                        ET.SubElement(head, "{http://www.w3.org/1999/xhtml}link", {
+                            "rel": "stylesheet", "type": "text/css",
+                            "href": posixpath.relpath(stylesheet, posixpath.dirname(entry.filename))})
+                        content = ET.tostring(document, encoding="utf-8", xml_declaration=True)
                 target.writestr(entry, content)
             for name, content in added.items():
                 target.writestr(name, content)

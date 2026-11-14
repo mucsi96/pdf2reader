@@ -33,6 +33,10 @@ def run_pipeline(args, work, manager):
         raise ValueError("PDF has no pages")
     checkpoints = checkpoint_directory(pdf, args)
     args = copy.copy(args)
+    refresh = getattr(args, "refresh_pages", None)
+    args.refresh_pages = set(parse_pages(refresh, total)) if refresh else set()
+    if not args.refresh_pages.issubset(pages):
+        raise ValueError("refresh-pages must be included in the selected pages")
     args.budget = RequestBudget(manager, checkpoints, getattr(args, "requests_per_minute", 10),
                                 tuple(getattr(args, name, None) for name in
                                       ("input_price", "cached_input_price", "output_price")))

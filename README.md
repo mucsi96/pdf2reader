@@ -111,6 +111,17 @@ stable location if running from different working directories. Changing the PDF 
 rendering settings starts a separate checkpoint set. Page selection, title, author
 and output-directory changes reuse applicable successful page calls.
 
+After improving conversion settings or reviewing a problem page, use
+`--pages 37-38,72 --refresh-pages 37-38,72` to regenerate only those pages in the
+same work directory. Successful replacements are checkpointed atomically; a failed
+replacement leaves the old checkpoint intact. Prompt changes alone do not discard
+existing paid conversions. A later full-book run reuses the corrected pages.
+
+Code listings and detected text tables are rendered as searchable text rather than
+duplicate screenshots. EPUB styling wraps long code lines, adds table cell borders,
+and scales figures for small screens. Code languages, emphasis, quotations, and
+ordered-list starts are retained during sanitization.
+
 The private work directory contains extracted text and figure images; it persists
 for resuming. Delete it yourself when no longer needed. An API call interrupted
 before its result is saved may need to be repeated.
@@ -137,6 +148,8 @@ uv run --locked python -m unittest -v
 
 Tests use a local API stub and synthetic PDFs; no paid model calls are made.
 See [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for the review scope and remaining limits.
+See [FORMATTING_REVIEW.md](FORMATTING_REVIEW.md) for the real-book formatting sample,
+small-screen rendering checks, and remaining limitations.
 
 ## Development
 
@@ -153,7 +166,8 @@ src/pdf2reader/
 ├── openai_client.py  # API requests, retries, and metadata extraction
 ├── budget.py         # shared rate limits and token cost accounting
 ├── checkpoints.py    # atomic storage and PDF/settings fingerprints
-└── export.py         # Pandoc, sanitization, and image embedding
+├── export.py         # Pandoc, sanitization, and image embedding
+└── reader.css        # reflowable e-reader styling
 tests/
 ├── test_openai.py    # local API stub and budget tests
 └── test_pipeline.py  # conversion, resume, and export security tests

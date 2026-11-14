@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--dpi", type=int, default=170)
     parser.add_argument("--fig-dpi", type=int, default=200)
     parser.add_argument("--pages")
+    parser.add_argument("--refresh-pages", help="reconvert these selected pages even if checkpointed (e.g. 37-38,72)")
     parser.add_argument("--no-images", dest="images", action="store_false")
     parser.add_argument("--title")
     parser.add_argument("--author")
