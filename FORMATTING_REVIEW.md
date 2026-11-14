@@ -54,3 +54,55 @@ The full-book job was stopped when checked: pages 1–229 were checkpointed, and
 full-book output existed. Its recorded estimate was $2.8402375 before this review.
 The review added $0.114027, including sample metadata; the new cumulative estimate is
 $2.9542645. These figures use recorded API token usage and the configured prices.
+
+## KOReader spine compatibility follow-up
+
+The first 100-page EPUB failed in KOReader with `Failed handling EPUB spine item
+'EPUB/text/title_page.xhtml'`. ElementTree had rewritten XHTML tags with namespace
+prefixes (`html:body`, etc.). Although valid XML and accepted by MuPDF, these tags
+were not recognized by KOReader's HTML parser.
+
+The exporter now preserves Pandoc's XHTML bytes and namespaces, inserting only the
+trusted stylesheet link. OPF serialization uses its standard default namespace.
+A regression test checks unprefixed HTML/body tags and preservation of all existing
+markup, including MathML.
+
+The failure was reproduced headlessly with the official KOReader v2026.07.1
+`libkoreader-cre` engine. The rebuilt 100-page EPUB loaded with zero failed spine
+items and 227,109 bytes of accessible book text. This verifies parsing in KOReader's
+engine, not visual layout on a physical device. No AI requests were repeated.
+
+Corrected local EPUB: `/home/mucsi/pdf2reader/agents-first-100-koreader-output/book.epub`.
+
+## Native navigation only
+
+The PDF outline identifies pages 8–21 as the printed contents section, ending at
+the Preface on page 22. The EPUB now excludes those source pages and builds its
+linked navigation from the actual included content. Markdown retains the source
+contents pages.
+
+Verified with KOReader v2026.07.1's actual engine: zero failed spine items, exactly
+one contents heading in the loaded book, and 95 native TOC entries. Every entry's
+XPointer resolved to a page and was navigated to with `gotoXPointer`. All 95 EPUB
+navigation hrefs were also checked against their XHTML files and fragment IDs.
+The rebuild reused checkpoints and incurred no additional model charges.
+
+Latest sample: `/home/mucsi/pdf2reader/agents-first-100-native-toc-output/book.epub`.
+
+## Page 26: GitHub URL typography
+
+Compared the original PDF with screenshots rendered by KOReader's engine at 600×800.
+The source uses Consolas at 8 points for the GitHub URLs versus Crimson Pro at 9.5
+points for surrounding prose. The earlier conversion lost this distinction and
+rendered both URLs in the body serif font.
+
+Clarified the prompt to retain source URL typography using inline code for monospaced
+URLs. Refreshed only page 26 and rebuilt the 100-page EPUB. Both exact GitHub URLs
+are now `<code>` elements and visibly monospace in the KOReader screenshot. Verified
+zero spine errors, one contents heading, and all 95 native TOC destinations again.
+The page refresh added approximately $0.013091 in estimated API cost.
+
+Screenshots: `work/page26-review/koreader-before-0.png` and
+`work/page26-review/koreader-after-0.png`; original PDF rendering: `work/page26-review/original.png`.
+
+Latest sample: `/home/mucsi/pdf2reader/agents-first-100-url-format-output/book.epub`.

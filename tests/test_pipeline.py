@@ -3,6 +3,7 @@ import concurrent.futures
 import io
 import json
 import pathlib
+import re
 import subprocess
 import tempfile
 import unittest
@@ -245,6 +246,26 @@ Math $x^2$ and a footnote.[^1]
                     for name in archive.namelist():
                         if name.endswith((".xhtml", ".opf", ".xml")):
                             ET.fromstring(archive.read(name))
+
+    def test_epub_xhtml_keeps_unprefixed_tags_for_koreader(self):
+        original = export.pandoc(b"# Chapter\n\nMath $x^2$ and `code`.\n", "markdown", "epub3",
+                                 self.root, "--mathml", "--toc")
+        result = export.finalize_epub(original, self.png, "2026-03")
+        with zipfile.ZipFile(io.BytesIO(original)) as source, zipfile.ZipFile(io.BytesIO(result)) as output:
+            for name in source.namelist():
+                if name.endswith(".xhtml"):
+                    xhtml = output.read(name)
+                    self.assertIn(b"<html ", xhtml)
+                    self.assertRegex(xhtml, rb"<body(?:\s|>)")
+                    self.assertNotRegex(xhtml, rb"</?\w+:(?:html|head|body|section|p)\b")
+                    # Preserve all markup, including MathML namespaces, except
+                    # for the one trusted stylesheet link added to the head.
+                    restored, count = re.subn(rb'<link rel="stylesheet" type="text/css" href="[^"]*pdf2reader\.css" />',
+                                              b"", xhtml)
+                    self.assertEqual(count, 1)
+                    self.assertEqual(restored, source.read(name))
+            package = output.read(next(name for name in output.namelist() if name.endswith(".opf")))
+            self.assertIn(b'<package xmlns="http://www.idpf.org/2007/opf"', package)
 
     def test_full_pipeline_and_resume_after_export_failure(self):
         def fake_ai(prompt, **kwargs):

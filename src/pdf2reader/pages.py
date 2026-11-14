@@ -30,7 +30,9 @@ Drop running headers, footers, page numbers, repeated logos and letterhead.
 Keep paragraph fragments that continue across pages without inventing missing text.
 Transcribe text and data in figures so it stays searchable. Never invent content;
 write [illegible] where needed. Do not output HTML or resource paths.
-Preserve printed URLs as plain text, not Markdown links or image targets.
+Preserve printed URLs verbatim, not as Markdown links or image targets.
+Preserve their source typography: wrap URLs printed in a monospace/code font in
+inline `backticks`; keep URLs printed in a normal body font as normal text.
 Put a blank line before each list and preserve nested list indentation.
 Use only these figure IDs for images: {figures}
 Place each supplied figure once in reading order as ![short caption](FIG_k).

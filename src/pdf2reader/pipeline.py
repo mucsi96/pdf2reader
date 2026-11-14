@@ -12,6 +12,7 @@ import pymupdf as fitz
 from . import export
 from .budget import RequestBudget
 from .checkpoints import checkpoint_directory, save_checkpoint
+from .contents import printed_contents_pages
 from .openai_client import meta_from
 from .pages import convert_page, parse_pages
 
@@ -28,6 +29,7 @@ def run_pipeline(args, work, manager):
         raise ValueError(f"output already exists; choose a new directory with -o: {output}")
     with fitz.open(pdf) as doc:
         total = len(doc)
+        contents_pages = printed_contents_pages(doc) if args.epub else set()
     pages = parse_pages(args.pages, total)
     if not pages:
         raise ValueError("PDF has no pages")
@@ -51,6 +53,7 @@ def run_pipeline(args, work, manager):
             print(f"page {n} complete ({len(results)}/{len(pages)})", file=sys.stderr)
 
     book, images = None, {}
+    epub_blocks = []
     for n in pages:
         md, figures = results[n]
         page = export.sanitize_page(md, figures, work)
@@ -59,6 +62,15 @@ def run_pipeline(args, work, manager):
         else:
             book["blocks"].extend(page["blocks"])
         images.update({name: data for name, data in figures.values()})
+        if n not in contents_pages:
+            epub_blocks.extend(page["blocks"])
+    if args.epub:
+        omitted = sorted(contents_pages.intersection(pages))
+        if omitted:
+            print(f"EPUB: omitted printed contents pages {','.join(map(str, omitted))}; "
+                  "using linked native navigation", file=sys.stderr)
+        if not epub_blocks:
+            raise ValueError("selected pages contain only printed contents; select book content for EPUB")
     meta = {}
     if args.epub:
         meta_path = checkpoints / f"metadata-{pages[0]}.json"
@@ -85,7 +97,7 @@ def run_pipeline(args, work, manager):
     meta = {key: value for key, value in meta.items() if value.strip()}
     book["meta"] = {k: {"t": "MetaString", "c": v} for k, v in meta.items()}
     cover = None
-    if 1 in pages and args.images:
+    if 1 in pages and args.images and 1 not in contents_pages:
         with fitz.open(pdf) as doc:
             cover = doc[0].get_pixmap(dpi=args.fig_dpi).tobytes("png")
         images["cover.png"] = cover
@@ -94,7 +106,8 @@ def run_pipeline(args, work, manager):
         markdown = b"![Cover](cover.png)\n\n" + markdown
     epub = None
     if args.epub:
-        epub = export.pandoc(json.dumps(export.embedded_ast(book, images)).encode(), "json", "epub3", work,
+        epub_book = {**book, "blocks": epub_blocks}
+        epub = export.pandoc(json.dumps(export.embedded_ast(epub_book, images)).encode(), "json", "epub3", work,
                              "--mathml", "--toc", "--toc-depth=2", "--split-level=2")
         epub = export.finalize_epub(epub, cover, meta.get("date"))
 

@@ -134,22 +134,27 @@ img { width: 100%; height: 100vh; object-fit: contain; }
 </style></head><body epub:type="cover"><img src="pdf2reader-cover.png" alt="Cover" /></body></html>'''
 
         output = io.BytesIO()
+        # OPF uses a default namespace. XHTML below is kept byte-for-byte apart
+        # from the stylesheet link: ElementTree's html:/ns0: tag prefixes are
+        # valid XML, but KOReader's HTML parser does not recognize them.
+        ET.register_namespace("", opf_ns)
+        ET.register_namespace("dc", dc_ns)
+        package_bytes = ET.tostring(package, encoding="utf-8", xml_declaration=True)
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as target:
             # EPUB requires the uncompressed mimetype entry to be first.
             target.writestr("mimetype", source.read("mimetype"), compress_type=zipfile.ZIP_STORED)
             for entry in source.infolist():
                 if entry.filename == "mimetype":
                     continue
-                content = (ET.tostring(package, encoding="utf-8", xml_declaration=True)
+                content = (package_bytes
                            if entry.filename == package_path else source.read(entry.filename))
                 if entry.filename.endswith(".xhtml"):
-                    document = ET.fromstring(content)
-                    head = document.find("{http://www.w3.org/1999/xhtml}head")
-                    if head is not None:
-                        ET.SubElement(head, "{http://www.w3.org/1999/xhtml}link", {
-                            "rel": "stylesheet", "type": "text/css",
-                            "href": posixpath.relpath(stylesheet, posixpath.dirname(entry.filename))})
-                        content = ET.tostring(document, encoding="utf-8", xml_declaration=True)
+                    link = ET.Element("link", {
+                        "rel": "stylesheet", "type": "text/css",
+                        "href": posixpath.relpath(stylesheet, posixpath.dirname(entry.filename))})
+                    if b"</head>" not in content:
+                        raise ValueError(f"Pandoc XHTML has no closing head: {entry.filename}")
+                    content = content.replace(b"</head>", ET.tostring(link) + b"</head>", 1)
                 target.writestr(entry, content)
             for name, content in added.items():
                 target.writestr(name, content)

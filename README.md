@@ -121,6 +121,10 @@ Code listings and detected text tables are rendered as searchable text rather th
 duplicate screenshots. EPUB styling wraps long code lines, adds table cell borders,
 and scales figures for small screens. Code languages, emphasis, quotations, and
 ordered-list starts are retained during sanitization.
+The EPUB omits the PDF's printed contents section and uses linked native navigation
+generated from the included chapters. Printed contents are located using PDF outline
+boundaries, or conservatively from contents headings and page-number listings when
+no outline is available. The Markdown export retains the source contents pages.
 
 The private work directory contains extracted text and figure images; it persists
 for resuming. Delete it yourself when no longer needed. An API call interrupted
